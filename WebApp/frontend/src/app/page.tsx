@@ -42,6 +42,7 @@ export default function HomePage() {
   const [unreadCount, setUnreadCount] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
 
   const loadNotifications = async (username: string) => {
     try {
@@ -78,6 +79,15 @@ export default function HomePage() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    if (!showNotif) return;
+    const handleClick = (e: MouseEvent) => {
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setShowNotif(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [showNotif]);
 
   const handleLogout = () => { localStorage.removeItem("user"); router.push("/login"); };
 
@@ -139,7 +149,7 @@ export default function HomePage() {
             <span className="text-sm text-gray-500">Xin chào, <span className="font-medium text-gray-700">{user.fullname}</span></span>
 
             {/* Notification Bell */}
-            <div className="relative">
+            <div className="relative" ref={notifRef}>
               <button onClick={() => { setShowNotif(!showNotif); if (!showNotif && unreadCount > 0) { axios.put(`${API_BASE}/notifications/read`, { username: user.username }); setUnreadCount(0); } }} className="p-2 hover:bg-gray-100 rounded-full transition relative" title="Thông báo">
                 <Bell size={18} className="text-gray-600" />
                 {unreadCount > 0 && <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{unreadCount}</span>}

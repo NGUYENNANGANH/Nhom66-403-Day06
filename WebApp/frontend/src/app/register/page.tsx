@@ -33,10 +33,8 @@ export default function RegisterPage() {
 
     setLoading(true);
     try {
-      const res = await axios.post(`${API_BASE}/auth/register`, { username, password, fullname });
-      localStorage.setItem("user", JSON.stringify(res.data.user));
-      const role = res.data.user.role || "employee";
-      router.push(role === "hr" ? "/admin" : "/");
+      await axios.post(`${API_BASE}/auth/register`, { username, password, fullname });
+      router.push("/login");
     } catch (err: unknown) {
       if (axios.isAxiosError(err) && err.response?.status === 409) {
         setError("Tên đăng nhập đã tồn tại. Vui lòng chọn tên khác.");
