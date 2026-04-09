@@ -1,23 +1,26 @@
 import os
+import json
+from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 
-# LangChain imports
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_loaders import TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import RunnablePassthrough
-from langchain_core.output_parsers import StrOutputParser
+from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+
+from prompts import AGENT_SYSTEM_PROMPT, WELCOME_MESSAGE, SUGGESTED_QUESTIONS
 
 load_dotenv()
 
-app = FastAPI(title="Internal RAG Chatbot API")
+app = FastAPI(title="HR Copilot — Agent API")
 
-# Setup CORS for Frontend
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -26,139 +29,272 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize models
+# ── Models ──────────────────────────────────────────────
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
 embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
-# Vector Store Path
+# ── Vector Store ────────────────────────────────────────
 CHROMA_PATH = "./chroma_db"
-DATA_DIR = "../../data"  # Path to Nhom30-E403/data
+DATA_DIR = "../data"
 
-# Initialize ChromaDB Vector Store
-vector_store = Chroma(
-    embedding_function=embeddings,
-    persist_directory=CHROMA_PATH
-)
+vector_store = None
+retriever = None
 
-def load_documents():
-    """Loads markdown data from Nhom30-E403/data and indexes it."""
-    docs = []
+def init_vector_store():
+    """Load .md files from data folder, chunk, embed, store in ChromaDB."""
+    global vector_store, retriever
+
+    vector_store = Chroma(
+        embedding_function=embeddings,
+        persist_directory=CHROMA_PATH,
+        collection_name="hr_docs"
+    )
+
+    existing = vector_store._collection.count()
+    if existing > 0:
+        print(f"ChromaDB already has {existing} chunks, skipping indexing.")
+        retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+        return existing
+
     if not os.path.exists(DATA_DIR):
+        print(f"WARNING: Data directory {DATA_DIR} not found!")
         return 0
-        
+
+    docs = []
     for filename in os.listdir(DATA_DIR):
-        if filename.endswith(".md") or filename.endswith(".txt"):
-            file_path = os.path.join(DATA_DIR, filename)
-            loader = TextLoader(file_path, encoding='utf-8')
+        if filename.endswith((".md", ".txt")):
+            filepath = os.path.join(DATA_DIR, filename)
+            loader = TextLoader(filepath, encoding="utf-8")
             docs.extend(loader.load())
-            
+
     if not docs:
         return 0
-        
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    splits = text_splitter.split_documents(docs)
-    
-    # Check if we need to add to chromadb to avoid duplicating on every restart
-    existing_count = vector_store._collection.count() if vector_store._collection else 0
-    if existing_count == 0:
-        vector_store.add_documents(documents=splits)
-        return len(splits)
-    return 0
 
-# RAG Setup
-retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+    splitter = RecursiveCharacterTextSplitter(chunk_size=500, chunk_overlap=50)
+    splits = splitter.split_documents(docs)
+    vector_store.add_documents(documents=splits)
+    retriever = vector_store.as_retriever(search_kwargs={"k": 3})
+    return len(splits)
 
-# System prompt emphasizing Path 3 & 4 (Uncertainty Handling)
-system_prompt = (
-    "Bạn là Trợ lý Nhân sự (HR Copilot) nội bộ của công ty. "
-    "Nhiệm vụ của bạn là giải đáp thắc mắc về chính sách dựa trên tài liệu đính kèm bên dưới.\n"
-    "Quy tắc quan trọng nhất:\n"
-    "1. CHỈ sử dụng tài liệu đính kèm để trả lời các câu hỏi về chính sách/quy chế. TUYỆT ĐỐI KHÔNG bịa ra chính sách (Hallucination).\n"
-    "2. Nếu người dùng chỉ đang chào hỏi (ví dụ: 'xin chào', 'hello', 'cảm ơn'), hãy đáp lại lịch sự, tự nhiên và hỏi xem họ cần tra cứu thông tin gì về nhân sự.\n"
-    "3. Nếu tài liệu không chứa câu trả lời HOẶC user hỏi về vấn đề chuyên môn/chính sách ngoài lề (giá vàng, ứng lương không có trong quy chế), "
-    "MỚI TRẢ LỜI ĐÚNG CÂU SAU: LỖI NGOÀI LUỒNG: 'Hệ thống hiện chưa có dữ liệu mảng này. Tôi sẽ mở ticket chuyển tiếp yêu cầu của bạn tới thẳng HR BP.'\n"
-    "4. LUÔN LUÔN trích dẫn nguồn văn bản (Ví dụ: [Trích dẫn: Chính sách Nghỉ phép - Mục X]) nếu trả lời dựa trên tài liệu.\n\n"
-    "Tài liệu liên quan:\n"
-    "{context}"
-)
 
-prompt = ChatPromptTemplate.from_messages([
-    ("system", system_prompt),
+# ── Agent Tools ─────────────────────────────────────────
+
+@tool
+def search_policy(query: str) -> str:
+    """Tìm kiếm chính sách HR trong Sổ tay Nhân sự nội bộ.
+    Dùng khi nhân viên hỏi về: nghỉ phép, bảo hiểm, lương thưởng, onboarding, quy trình HR.
+    Trả về nội dung tài liệu liên quan kèm tên file nguồn."""
+    if retriever is None:
+        return "ERROR: Vector store chưa được khởi tạo."
+    results = retriever.invoke(query)
+    if not results:
+        return "KHÔNG TÌM THẤY tài liệu liên quan trong kho dữ liệu nội bộ."
+    output_parts = []
+    for doc in results:
+        source = os.path.basename(doc.metadata.get("source", "unknown"))
+        output_parts.append(f"[Nguồn: {source}]\n{doc.page_content}")
+    return "\n\n---\n\n".join(output_parts)
+
+
+@tool
+def calculate_leave(years_worked: float) -> str:
+    """Tính số ngày phép năm dựa trên thâm niên làm việc.
+    Dùng khi nhân viên hỏi cụ thể về SỐ NGÀY PHÉP của họ kèm thông tin thâm niên.
+    Input: số năm đã làm việc (ví dụ: 0.5, 1, 2, 5)."""
+    if years_worked < 0:
+        return "Thâm niên không hợp lệ."
+    if years_worked < 1:
+        months = int(years_worked * 12)
+        return (
+            f"Thâm niên: {years_worked} năm ({months} tháng).\n"
+            f"Theo chính sách, nhân viên dưới 1 năm được 12 ngày phép/năm "
+            f"(tích lũy 1 ngày/tháng).\n"
+            f"Bạn hiện có khoảng {months} ngày phép tích lũy.\n"
+            f"[Nguồn: chinh-sach-nghi-phep.md]"
+        )
+    elif years_worked <= 3:
+        return (
+            f"Thâm niên: {years_worked} năm.\n"
+            f"Theo chính sách, nhân viên từ 1-3 năm được 14 ngày phép/năm.\n"
+            f"[Nguồn: chinh-sach-nghi-phep.md]"
+        )
+    else:
+        return (
+            f"Thâm niên: {years_worked} năm.\n"
+            f"Theo chính sách, nhân viên trên 3 năm hoặc cấp Manager trở lên "
+            f"được 15 ngày phép/năm.\n"
+            f"[Nguồn: chinh-sach-nghi-phep.md]"
+        )
+
+
+@tool
+def escalate_to_hr(reason: str) -> str:
+    """Tạo ticket chuyển yêu cầu sang HR xử lý trực tiếp.
+    Dùng khi: câu hỏi quá phức tạp, liên quan khiếu nại, tranh chấp,
+    hoặc cần phê duyệt từ con người (duyệt phép, ký giải ngân)."""
+    ticket_id = f"HR-{datetime.now().strftime('%Y%m%d%H%M%S')}"
+    return (
+        f"ESCALATED: Đã tạo ticket [{ticket_id}] gửi tới HR Business Partner.\n"
+        f"Lý do: {reason}\n"
+        f"Nhân viên sẽ nhận phản hồi từ HR trong vòng 24h làm việc qua email."
+    )
+
+
+@tool
+def reject_out_of_scope(topic: str) -> str:
+    """Từ chối trả lời câu hỏi nằm ngoài phạm vi HR/chính sách công ty.
+    Dùng khi nhân viên hỏi về: giá vàng, thời tiết, thể thao, chính trị,
+    hoặc bất kỳ chủ đề nào KHÔNG liên quan đến nhân sự/chính sách nội bộ."""
+    return (
+        f"LỖI NGOÀI LUỒNG: Câu hỏi về '{topic}' nằm ngoài phạm vi hệ thống HR Copilot.\n"
+        f"Tôi chỉ hỗ trợ tra cứu chính sách nhân sự nội bộ "
+        f"(nghỉ phép, bảo hiểm, lương thưởng, onboarding).\n"
+        f"Vui lòng liên hệ bộ phận phù hợp hoặc tìm kiếm trên Google."
+    )
+
+
+# ── Agent Setup ─────────────────────────────────────────
+
+tools = [search_policy, calculate_leave, escalate_to_hr, reject_out_of_scope]
+
+agent_prompt = ChatPromptTemplate.from_messages([
+    ("system", AGENT_SYSTEM_PROMPT),
+    MessagesPlaceholder(variable_name="chat_history", optional=True),
     ("human", "{input}"),
+    MessagesPlaceholder(variable_name="agent_scratchpad"),
 ])
 
-# Manual RAG Setup
-def format_docs(docs):
-    return "\n\n".join(doc.page_content for doc in docs)
-
-rag_chain = (
-    {"context": retriever | format_docs, "input": RunnablePassthrough()}
-    | prompt
-    | llm
-    | StrOutputParser()
+agent = create_tool_calling_agent(llm, tools, agent_prompt)
+agent_executor = AgentExecutor(
+    agent=agent,
+    tools=tools,
+    verbose=True,
+    max_iterations=5,
+    handle_parsing_errors=True,
 )
 
-# Pydantic models
+
+# ── API Models ──────────────────────────────────────────
+
 class ChatRequest(BaseModel):
     message: str
 
 class ChatResponse(BaseModel):
     answer: str
     is_fallback: bool
+    is_escalated: bool
     citations: list[str]
+    tool_used: str
+
+
+# ── Endpoints ───────────────────────────────────────────
 
 @app.on_event("startup")
-async def startup_event():
-    print("Loading internal documents...")
-    chunks_added = load_documents()
-    print(f"Added {chunks_added} chunks to ChromaDB.")
+async def startup():
+    print("Initializing HR Copilot Agent...")
+    chunks = init_vector_store()
+    print(f"Vector store ready — {chunks} chunks indexed.")
+    print(f"Agent tools: {[t.name for t in tools]}")
+
 
 @app.post("/chat", response_model=ChatResponse)
-async def chat_endpoint(request: ChatRequest):
+async def chat(request: ChatRequest):
     try:
-        # Retrieve context manually to supply citations
-        context_docs = retriever.invoke(request.message)
-        
-        # Run RAG chain
-        answer = rag_chain.invoke(request.message)
-        
-        # Check Fallback mode (Path 4)
-        is_fallback = "LỖI NGOÀI LUỒNG" in answer or "KHÔNG CÓ THÔNG TIN" in answer.upper()
-        
+        result = agent_executor.invoke({"input": request.message})
+        answer = result["output"]
+
+        is_fallback = "LỖI NGOÀI LUỒNG" in answer
+        is_escalated = "ESCALATED" in answer
+
         citations = []
-        if not is_fallback:
-            for doc in context_docs:
-                source = doc.metadata.get("source", "Tài liệu nội bộ")
-                filename = os.path.basename(source)
-                if filename not in citations:
+        for marker in ["[Nguồn: ", "[Nguồn:"]:
+            start = 0
+            while True:
+                idx = answer.find(marker, start)
+                if idx == -1:
+                    break
+                end = answer.find("]", idx)
+                if end == -1:
+                    break
+                filename = answer[idx + len(marker):end].strip()
+                if filename and filename not in citations:
                     citations.append(filename)
-                    
+                start = end + 1
+
+        tool_used = "none"
+        if is_fallback:
+            tool_used = "reject_out_of_scope"
+        elif is_escalated:
+            tool_used = "escalate_to_hr"
+        elif citations:
+            tool_used = "search_policy"
+        if "ngày phép" in answer.lower() and "thâm niên" in answer.lower():
+            tool_used = "calculate_leave"
+
         return ChatResponse(
             answer=answer,
             is_fallback=is_fallback,
-            citations=citations
+            is_escalated=is_escalated,
+            citations=citations,
+            tool_used=tool_used,
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+
+@app.post("/report-error")
+async def report_error(request: dict):
+    """Nhận báo lỗi từ user khi AI trả lời sai — Correction Path."""
+    log_entry = {
+        "timestamp": datetime.now().isoformat(),
+        "original_question": request.get("question", ""),
+        "ai_answer": request.get("answer", ""),
+        "user_note": request.get("note", ""),
+    }
+    log_path = os.path.join(DATA_DIR, "..", "test", "error-reports.json")
+    os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
+    logs = []
+    if os.path.exists(log_path):
+        with open(log_path, "r", encoding="utf-8") as f:
+            logs = json.load(f)
+    logs.append(log_entry)
+    with open(log_path, "w", encoding="utf-8") as f:
+        json.dump(logs, f, ensure_ascii=False, indent=2)
+
+    return {"status": "logged", "entry": log_entry}
+
+
 @app.get("/document/{filename}")
 async def get_document(filename: str):
-    try:
-        # Đường dẫn an toàn để đọc nội dung file từ thư mục data
-        file_path = os.path.join(DATA_DIR, filename)
-        if not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu trong kho lưu trữ.")
-            
-        with open(file_path, "r", encoding="utf-8") as f:
-            content = f.read()
-            
-        return {"filename": filename, "content": content}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    """Trả nội dung file gốc để hiện trong Citation Viewer."""
+    filepath = os.path.join(DATA_DIR, filename)
+    if not os.path.exists(filepath):
+        raise HTTPException(status_code=404, detail="Không tìm thấy tài liệu.")
+    with open(filepath, "r", encoding="utf-8") as f:
+        content = f.read()
+    return {"filename": filename, "content": content}
+
+
+@app.get("/init")
+async def get_init():
+    """Trả welcome message + suggested questions cho frontend."""
+    return {
+        "welcome": WELCOME_MESSAGE,
+        "suggestions": SUGGESTED_QUESTIONS,
+    }
+
 
 @app.get("/health")
-async def health_check():
-    return {"status": "ok", "docs_in_db": vector_store._collection.count()}
+async def health():
+    doc_count = vector_store._collection.count() if vector_store else 0
+    return {
+        "status": "ok",
+        "docs_in_db": doc_count,
+        "tools": [t.name for t in tools],
+        "model": "gpt-4o-mini",
+    }
+
 
 if __name__ == "__main__":
     import uvicorn
