@@ -103,6 +103,7 @@ export default function HomePage() {
     { icon: <Zap className="text-amber-600" size={28} />, title: "Lương thưởng & KPI", desc: "Thưởng Tết 1 tháng lương, thưởng KPI quý lên tới 150%", color: "bg-amber-50 border-amber-200 hover:bg-amber-100" },
     { icon: <Users className="text-rose-600" size={28} />, title: "Onboarding", desc: "Checklist ngày đầu, thử việc 2 tháng 85% lương, 5 khóa e-learning", color: "bg-rose-50 border-rose-200 hover:bg-rose-100" },
     { icon: <FileText className="text-cyan-600" size={28} />, title: "Xem tài liệu gốc", desc: "Truy cập trực tiếp văn bản chính sách nội bộ kèm trích dẫn", color: "bg-cyan-50 border-cyan-200 hover:bg-cyan-100" },
+    { icon: <MessageSquare className="text-indigo-600" size={28} />, title: "Hỗ trợ từ HR", desc: "Escalate câu hỏi phức tạp sang HR Business Partner xử lý trực tiếp", color: "bg-indigo-50 border-indigo-200 hover:bg-indigo-100" },
   ];
 
   return (
