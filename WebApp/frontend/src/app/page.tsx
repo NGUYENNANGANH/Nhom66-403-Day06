@@ -126,12 +126,12 @@ export default function HomePage() {
   if (!user) return null;
 
   const features = [
-    { icon: <BookOpen className="text-emerald-600" size={28} />, title: "Nghỉ phép & Nghỉ ốm", desc: "12-15 ngày phép/năm tùy thâm niên, 10 ngày ốm hưởng 70% lương", color: "bg-emerald-50 border-emerald-200 hover:bg-emerald-100" },
-    { icon: <Shield className="text-purple-600" size={28} />, title: "Bảo hiểm", desc: "BHXH, BHYT, BHTN + PVI Care Premium với hạn mức nha khoa 5 triệu/năm", color: "bg-purple-50 border-purple-200 hover:bg-purple-100" },
-    { icon: <Zap className="text-amber-600" size={28} />, title: "Lương thưởng & KPI", desc: "Thưởng Tết 1 tháng lương, thưởng KPI quý lên tới 150%", color: "bg-amber-50 border-amber-200 hover:bg-amber-100" },
-    { icon: <Users className="text-rose-600" size={28} />, title: "Onboarding", desc: "Checklist ngày đầu, thử việc 2 tháng 85% lương, 5 khóa e-learning", color: "bg-rose-50 border-rose-200 hover:bg-rose-100" },
-    { icon: <FileText className="text-cyan-600" size={28} />, title: "Xem tài liệu gốc", desc: "Truy cập trực tiếp văn bản chính sách nội bộ kèm trích dẫn", color: "bg-cyan-50 border-cyan-200 hover:bg-cyan-100" },
-    { icon: <MessageSquare className="text-indigo-600" size={28} />, title: "Hỗ trợ từ HR", desc: "Escalate câu hỏi phức tạp sang HR Business Partner xử lý trực tiếp", color: "bg-indigo-50 border-indigo-200 hover:bg-indigo-100" },
+    { icon: <BookOpen className="text-emerald-600" size={28} />, title: "Nghỉ phép & Nghỉ ốm", desc: "12-15 ngày phép/năm tùy thâm niên, 10 ngày ốm hưởng 70% lương", color: "bg-emerald-50 border-emerald-200 hover:bg-emerald-100", prompt: "Tôi được nghỉ phép mấy ngày một năm?" },
+    { icon: <Shield className="text-purple-600" size={28} />, title: "Bảo hiểm", desc: "BHXH, BHYT, BHTN + PVI Care Premium với hạn mức nha khoa 5 triệu/năm", color: "bg-purple-50 border-purple-200 hover:bg-purple-100", prompt: "Bảo hiểm nha khoa được bao nhiêu?" },
+    { icon: <Zap className="text-amber-600" size={28} />, title: "Lương thưởng & KPI", desc: "Thưởng Tết 1 tháng lương, thưởng KPI quý lên tới 150%", color: "bg-amber-50 border-amber-200 hover:bg-amber-100", prompt: "Thưởng Tết được tính như thế nào?" },
+    { icon: <Users className="text-rose-600" size={28} />, title: "Onboarding", desc: "Checklist ngày đầu, thử việc 2 tháng 85% lương, 5 khóa e-learning", color: "bg-rose-50 border-rose-200 hover:bg-rose-100", prompt: "Ngày đầu đi làm cần mang theo gì?" },
+    { icon: <FileText className="text-cyan-600" size={28} />, title: "Xem tài liệu gốc", desc: "Truy cập trực tiếp văn bản chính sách nội bộ kèm trích dẫn", color: "bg-cyan-50 border-cyan-200 hover:bg-cyan-100", prompt: "Cho tôi xem danh sách các chính sách nội bộ" },
+    { icon: <MessageSquare className="text-indigo-600" size={28} />, title: "Xin nghỉ phép", desc: "Gửi đơn xin nghỉ phép trực tiếp qua chat, HR duyệt trên Dashboard", color: "bg-indigo-50 border-indigo-200 hover:bg-indigo-100", prompt: "Tôi muốn xin nghỉ phép" },
   ];
 
   return (
@@ -195,7 +195,7 @@ export default function HomePage() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {features.map((f, i) => (
-            <button key={i} onClick={() => setShowChat(true)} className={`p-5 rounded-xl border transition ${f.color} flex flex-col gap-3 text-left`}>
+            <button key={i} onClick={() => { setShowChat(true); if (messages.length <= 1) setTimeout(() => handleSend(f.prompt), 300); }} className={`p-5 rounded-xl border transition ${f.color} flex flex-col gap-3 text-left`}>
               <div className="w-12 h-12 rounded-xl bg-white shadow-sm flex items-center justify-center">{f.icon}</div>
               <h3 className="font-semibold text-gray-800">{f.title}</h3>
               <p className="text-sm text-gray-500 leading-relaxed">{f.desc}</p>
