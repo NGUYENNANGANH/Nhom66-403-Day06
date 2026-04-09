@@ -2,10 +2,11 @@
 
 import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import axios from "axios";
 import {
   MessageSquare, FileText, Shield, LogOut, Bot, BookOpen, Users, Zap,
-  Send, User, AlertTriangle, CheckCircle2, Moon, Sun, X, Flag
+  Send, User, AlertTriangle, CheckCircle2, Moon, Sun, X, Flag, Bell
 } from "lucide-react";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
@@ -20,7 +21,7 @@ interface Message {
 
 export default function HomePage() {
   const router = useRouter();
-  const [user, setUser] = useState<{ username: string; fullname: string } | null>(null);
+  const [user, setUser] = useState<{ username: string; fullname: string; role?: string } | null>(null);
   const [showChat, setShowChat] = useState(false);
 
   // Chat state
@@ -36,13 +37,28 @@ export default function HomePage() {
 
   const [reportingIdx, setReportingIdx] = useState<number | null>(null);
   const [reportNote, setReportNote] = useState("");
+  const [notifications, setNotifications] = useState<{ _id: string; message: string; type: string; read: boolean; created_at: string }[]>([]);
+  const [showNotif, setShowNotif] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const loadNotifications = async (username: string) => {
+    try {
+      const res = await axios.get(`${API_BASE}/notifications?username=${username}`);
+      setNotifications(res.data.notifications);
+      setUnreadCount(res.data.unread);
+    } catch { /* ignore */ }
+  };
 
   useEffect(() => {
     const stored = localStorage.getItem("user");
     if (!stored) { router.push("/login"); return; }
-    setUser(JSON.parse(stored));
+    const parsed = JSON.parse(stored);
+    setUser(parsed);
+    loadNotifications(parsed.username);
+    const interval = setInterval(() => loadNotifications(parsed.username), 15000);
+    return () => clearInterval(interval);
   }, [router]);
 
   useEffect(() => {
@@ -85,10 +101,12 @@ export default function HomePage() {
   const handleSend = async (overrideMsg?: string) => {
     const userMsg = (overrideMsg || input).trim();
     if (!userMsg) return;
-    setMessages(prev => [...prev, { role: "user", content: userMsg }]);
+    const updatedMessages = [...messages, { role: "user" as const, content: userMsg }];
+    setMessages(updatedMessages);
     setInput(""); setSuggestions([]); setIsLoading(true);
     try {
-      const res = await axios.post(`${API_BASE}/chat`, { message: userMsg });
+      const history = updatedMessages.slice(1).map(m => ({ role: m.role === "user" ? "user" : "bot", content: m.content }));
+      const res = await axios.post(`${API_BASE}/chat`, { message: userMsg, username: user?.username || "anonymous", history });
       setMessages(prev => [...prev, { role: "bot", content: res.data.answer, is_fallback: res.data.is_fallback, is_escalated: res.data.is_escalated, citations: res.data.citations }]);
     } catch {
       setMessages(prev => [...prev, { role: "bot", content: "Lỗi kết nối tới Server.", is_fallback: true }]);
@@ -119,6 +137,38 @@ export default function HomePage() {
           </div>
           <div className="flex items-center gap-4">
             <span className="text-sm text-gray-500">Xin chào, <span className="font-medium text-gray-700">{user.fullname}</span></span>
+
+            {/* Notification Bell */}
+            <div className="relative">
+              <button onClick={() => { setShowNotif(!showNotif); if (!showNotif && unreadCount > 0) { axios.put(`${API_BASE}/notifications/read`, { username: user.username }); setUnreadCount(0); } }} className="p-2 hover:bg-gray-100 rounded-full transition relative" title="Thông báo">
+                <Bell size={18} className="text-gray-600" />
+                {unreadCount > 0 && <span className="absolute -top-0.5 -right-0.5 w-4 h-4 bg-red-500 text-white text-[10px] rounded-full flex items-center justify-center font-bold">{unreadCount}</span>}
+              </button>
+              {showNotif && (
+                <div className="absolute right-0 top-full mt-2 w-80 bg-white rounded-xl shadow-2xl border z-50 max-h-80 overflow-y-auto">
+                  <div className="p-3 border-b font-semibold text-sm text-gray-700">Thông báo</div>
+                  {notifications.length === 0 ? (
+                    <div className="p-4 text-center text-sm text-gray-400">Chưa có thông báo</div>
+                  ) : notifications.map(n => (
+                    <div key={n._id} className={`p-3 border-b last:border-0 text-sm ${!n.read ? 'bg-blue-50' : ''}`}>
+                      <div className="flex items-start gap-2">
+                        <div className={`w-2 h-2 rounded-full mt-1.5 flex-shrink-0 ${n.type === 'leave_approved' ? 'bg-green-500' : 'bg-red-500'}`} />
+                        <div>
+                          <p className="text-gray-700">{n.message}</p>
+                          <p className="text-xs text-gray-400 mt-0.5">{new Date(n.created_at).toLocaleString("vi-VN")}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {user?.role === "hr" && (
+              <Link href="/admin" className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 transition font-medium">
+                <Shield size={16} /> HR Admin
+              </Link>
+            )}
             <button onClick={handleLogout} className="flex items-center gap-1.5 text-sm text-red-500 hover:text-red-600 transition font-medium">
               <LogOut size={16} /> Đăng xuất
             </button>
@@ -131,9 +181,6 @@ export default function HomePage() {
         <div className="text-center mb-10">
           <h1 className="text-3xl font-bold text-gray-800 mb-3">Chào mừng đến với HR Copilot</h1>
           <p className="text-gray-500 max-w-xl mx-auto">Hệ thống tra cứu chính sách nhân sự nội bộ sử dụng AI. Hỏi bất kỳ điều gì về nghỉ phép, bảo hiểm, lương thưởng, onboarding.</p>
-          <button onClick={() => setShowChat(true)} className="inline-flex items-center gap-2 mt-6 px-6 py-3 bg-blue-600 text-white rounded-xl font-medium hover:bg-blue-700 transition shadow-lg shadow-blue-200">
-            <MessageSquare size={18} /> Bắt đầu Chat với AI
-          </button>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

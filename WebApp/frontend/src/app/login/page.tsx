@@ -23,7 +23,8 @@ export default function LoginPage() {
     try {
       const res = await axios.post(`${API_BASE}/auth/login`, { username, password });
       localStorage.setItem("user", JSON.stringify(res.data.user));
-      router.push("/");
+      const role = res.data.user.role || "employee";
+      router.push(role === "hr" ? "/admin" : "/");
     } catch (err: unknown) {
       if (axios.isAxiosError(err) && err.response?.status === 401) {
         setError("Sai tên đăng nhập hoặc mật khẩu.");
