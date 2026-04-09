@@ -1,5 +1,6 @@
 import os
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,18 +13,30 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import Chroma
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain.agents import create_tool_calling_agent, AgentExecutor
+from langchain_classic.agents import create_tool_calling_agent, AgentExecutor
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 
 from prompts import AGENT_SYSTEM_PROMPT, WELCOME_MESSAGE, SUGGESTED_QUESTIONS
 
 load_dotenv()
 
-app = FastAPI(title="HR Copilot — Agent API")
+ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("Initializing HR Copilot Agent...")
+    chunks = init_vector_store()
+    print(f"Vector store ready — {chunks} chunks indexed.")
+    print(f"Agent tools: {[t.name for t in tools]}")
+    yield
+
+
+app = FastAPI(title="HR Copilot — Agent API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -35,7 +48,7 @@ embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
 
 # ── Vector Store ────────────────────────────────────────
 CHROMA_PATH = "./chroma_db"
-DATA_DIR = "../data"
+DATA_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "data")
 
 vector_store = None
 retriever = None
@@ -188,14 +201,6 @@ class ChatResponse(BaseModel):
 
 
 # ── Endpoints ───────────────────────────────────────────
-
-@app.on_event("startup")
-async def startup():
-    print("Initializing HR Copilot Agent...")
-    chunks = init_vector_store()
-    print(f"Vector store ready — {chunks} chunks indexed.")
-    print(f"Agent tools: {[t.name for t in tools]}")
-
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
