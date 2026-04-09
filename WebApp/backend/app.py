@@ -1,11 +1,13 @@
 import os
 import json
+import hashlib
 from contextlib import asynccontextmanager
 from datetime import datetime
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
+from pymongo import MongoClient
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 from langchain_community.document_loaders import TextLoader
@@ -21,6 +23,15 @@ from prompts import AGENT_SYSTEM_PROMPT, WELCOME_MESSAGE, SUGGESTED_QUESTIONS
 load_dotenv()
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",")
+MONGO_URI = os.getenv("MONGO_URI", "mongodb://localhost:27017")
+
+mongo_client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+db = mongo_client["hr_copilot"]
+users_col = db["users"]
+error_reports_col = db["error_reports"]
+chat_logs_col = db["chat_logs"]
+
+users_col.create_index("username", unique=True)
 
 
 @asynccontextmanager
@@ -29,7 +40,9 @@ async def lifespan(app: FastAPI):
     chunks = init_vector_store()
     print(f"Vector store ready — {chunks} chunks indexed.")
     print(f"Agent tools: {[t.name for t in tools]}")
+    print(f"MongoDB: {MONGO_URI} / db=hr_copilot")
     yield
+    mongo_client.close()
 
 
 app = FastAPI(title="HR Copilot — Agent API", lifespan=lifespan)
@@ -199,8 +212,42 @@ class ChatResponse(BaseModel):
     citations: list[str]
     tool_used: str
 
+class AuthRequest(BaseModel):
+    username: str
+    password: str
+    fullname: str = ""
+
+
+# ── Auth Helpers ─────────────────────────────────────────
+
+def _hash_pw(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
 
 # ── Endpoints ───────────────────────────────────────────
+
+@app.post("/auth/register")
+async def register(req: AuthRequest):
+    if not req.username or not req.password:
+        raise HTTPException(400, "Username và password không được trống.")
+    if users_col.find_one({"username": req.username}):
+        raise HTTPException(409, "Tên đăng nhập đã tồn tại.")
+    user_doc = {
+        "username": req.username,
+        "password": _hash_pw(req.password),
+        "fullname": req.fullname or req.username,
+        "created_at": datetime.now().isoformat(),
+    }
+    users_col.insert_one(user_doc)
+    return {"status": "ok", "user": {"username": user_doc["username"], "fullname": user_doc["fullname"]}}
+
+
+@app.post("/auth/login")
+async def login(req: AuthRequest):
+    user = users_col.find_one({"username": req.username, "password": _hash_pw(req.password)})
+    if not user:
+        raise HTTPException(401, "Sai tên đăng nhập hoặc mật khẩu.")
+    return {"status": "ok", "user": {"username": user["username"], "fullname": user["fullname"]}}
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
@@ -256,18 +303,8 @@ async def report_error(request: dict):
         "ai_answer": request.get("answer", ""),
         "user_note": request.get("note", ""),
     }
-    log_path = os.path.join(DATA_DIR, "..", "test", "error-reports.json")
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
-
-    logs = []
-    if os.path.exists(log_path):
-        with open(log_path, "r", encoding="utf-8") as f:
-            logs = json.load(f)
-    logs.append(log_entry)
-    with open(log_path, "w", encoding="utf-8") as f:
-        json.dump(logs, f, ensure_ascii=False, indent=2)
-
-    return {"status": "logged", "entry": log_entry}
+    error_reports_col.insert_one(log_entry)
+    return {"status": "logged", "entry": {k: v for k, v in log_entry.items() if k != "_id"}}
 
 
 @app.get("/document/{filename}")
