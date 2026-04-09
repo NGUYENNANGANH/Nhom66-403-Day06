@@ -1,6 +1,6 @@
 # SPEC — AI Product Hackathon
 
-**Nhóm:** 30 (Phòng E403)
+**Nhóm:** 66 (Phòng E403)
 **Track:** ☐ VinFast · ☐ Vinmec · ☐ VinUni-VinSchool · ☐ XanhSM · ☒ Open
 **Problem statement (1 câu):** *Nhân viên doanh nghiệp phải chờ đợi lâu khi hỏi HR/IT những câu hỏi lặp lại về chính sách, quy trình — hiện tại phải nhắn tin/gọi điện chờ HR trả lời thủ công — AI RAG Chatbot tự đọc Sổ tay công ty và trả lời ngay lập tức 24/7, giải phóng thời gian cho cả hai bên.*
 
@@ -11,7 +11,7 @@
 4. Phạm Thanh Tùng — 2A202600268
 5. Dương Phương Thảo — 2A202600049
 
-**Ngày nộp:** 08/04/2026
+**Ngày nộp:** 09/04/2026
 
 ---
 
@@ -125,15 +125,53 @@ Nếu sai ngược lại thì chuyện gì xảy ra? *Nếu chọn Recall cao nh
 - Frontend: Next.js 14 + TailwindCSS (Dark Mode, Citation Viewer Modal)
 - LLM: OpenAI GPT-4o-mini (~$0.001/query, latency <2s)
 
-## 7. Phân công nhiệm vụ (Chia Việc)
+## 7. Phân công nhiệm vụ
 
-| Thành viên | Vai trò & Trách nhiệm chính trong dự án |
-|-----------|------------------------------------------|
-| **Trịnh Kế Tiến (Product Lead & Fullstack Dev)** | **(Thành viên chính)**. Đề xuất quy trình, thiết kế kiến trúc AI tổng thể, trực tiếp lập trình Core RAG Backend + Frontend Next.js MVP, tổng hợp và hoàn thiện toàn bộ bản SPEC. |
-| **Mai Phi Hiếu (UX/Data Analyst)** | Thiết kế User Stories (4 paths), vạch ra kịch bản Xử lý ngoại luồng (Fallback), thu thập dữ liệu nội quy nhân sự làm Mock Data. |
-| **Nguyễn Năng Anh (Business Analyst)** | Phụ trách tính toán bài toán đầu tư (ROI 3 kịch bản), rà soát hiệu quả biên (Marginal value) và vẽ UI Mockup tính năng Citation. |
-| **Phạm Thanh Tùng (QA/Security)** | Đặc tả luồng đo lường chất lượng AI (Eval metrics), rà soát Top 3 Failure Modes và thiết lập phương án phòng chống Data Leakage. |
-| **Dương Phương Thảo (Product Strategist)** | Đóng góp và tinh chỉnh khung AI Product Canvas (Value, Trust, Feasibility), xây dựng quy trình Learning Signal cho Feedback Loop. |
+> Phân công theo **chức năng end-to-end** — mỗi người sở hữu trọn vẹn 1–2 tính năng (từ AI prompt/tool → backend API → frontend UI), đảm bảo ai cũng trực tiếp làm việc với AI.
+>
+> **Chung cả nhóm:** Thu thập & chuẩn hóa mock data HR (4 file `.md` trong `data/`).
+
+### Tổng quan phân công
+
+| Thành viên | Chức năng sở hữu (end-to-end) | Phần AI trực tiếp làm | SPEC phụ trách |
+|-----------|-------------------------------|----------------------|----------------|
+| **Trịnh Kế Tiến** | RAG Pipeline + Agent Architecture | Thiết kế Agent (LangChain), RAG indexing, tool `search_policy`, citation extraction | Phần 6: Mini AI spec |
+| **Mai Phi Hiếu** | Chat UI + Guardrail ngoài phạm vi | Tool `reject_out_of_scope`, UI hiển thị cảnh báo AI, Citation Viewer Modal | Phần 2: User Stories 4 paths |
+| **Nguyễn Năng Anh** | Xin nghỉ phép + Đánh giá câu trả lời | Tool `submit_leave_request`, tool `calculate_leave`, chức năng Báo lỗi (correction path) | Phần 5: ROI + Phần 4: Failure modes |
+| **Phạm Thanh Tùng** | Auth + Admin Dashboard + Escalation | Tool `escalate_to_hr`, dashboard thống kê AI (tool usage, chat logs), quản lý users | Phần 3: Eval metrics |
+| **Dương Phương Thảo** | System Prompt + Data Engineering + Learning Signal | Viết System Prompt (AGENT_SYSTEM_PROMPT), thiết kế prompt rules, welcome message, suggested questions | Phần 1: AI Product Canvas |
+
+### Chi tiết từng thành viên
+
+**1. Trịnh Kế Tiến — Chức năng: RAG Pipeline + Agent Architecture**
+- **AI:** Thiết kế kiến trúc LangChain Agent (AgentExecutor + tool calling), xây dựng RAG pipeline (TextLoader → RecursiveCharacterTextSplitter → OpenAI Embedding → ChromaDB), lập trình tool `search_policy` (vector search top-3 + trả nguồn trích dẫn), logic parse citation `[Nguồn: file.md]` từ output Agent
+- **Prototype:** FastAPI server setup, `/chat` endpoint (nhận câu hỏi → Agent xử lý → trả response), `/document/{filename}` endpoint (phục vụ Citation Viewer), `/health` endpoint
+- **SPEC:** Viết phần 6 (Mini AI spec — tóm tắt toàn bộ product), tổng hợp và review SPEC final
+- **Demo:** Trình bày kiến trúc RAG + Agent, demo live chatbot tra cứu chính sách
+
+**2. Mai Phi Hiếu — Chức năng: Chat UI + Guardrail ngoài phạm vi**
+- **AI:** Lập trình tool `reject_out_of_scope` (phát hiện câu hỏi ngoài phạm vi HR → trả cảnh báo "LỖI NGOÀI LUỒNG"), thiết kế logic hiển thị khác biệt cho từng loại response AI (bình thường / fallback viền đỏ / escalated viền vàng)
+- **Prototype:** Toàn bộ giao diện Chat page (`chat/page.tsx`) — chat bubble, dark mode, suggested questions, Citation Viewer Modal (click xem văn bản gốc), responsive layout. Landing page (`page.tsx`)
+- **SPEC:** Viết phần 2 (User Stories 4 paths) — thiết kế 2 features × 4 paths (happy / low-confidence / failure / correction)
+- **Demo:** Viết demo script 5 phút, trình bày UX flow Before/After
+
+**3. Nguyễn Năng Anh — Chức năng: Xin nghỉ phép + Đánh giá câu trả lời**
+- **AI:** Lập trình tool `submit_leave_request` (nhân viên nói với chatbot muốn nghỉ phép → Agent tự hỏi ngày/lý do → tạo đơn vào MongoDB), lập trình tool `calculate_leave` (tính ngày phép theo thâm niên dựa trên chính sách), xây dựng chức năng Báo lỗi/Đánh giá câu trả lời AI (correction path: user bấm "Báo lỗi" → ghi log câu hỏi + câu trả lời sai + ghi chú → HR review)
+- **Prototype:** Backend: `/report-error` endpoint, leave request API (CRUD + approve/reject), notification system (thông báo khi đơn được duyệt/từ chối), `/my-leaves` endpoint. Frontend: UI nút "Báo lỗi" trên mỗi tin nhắn bot + form nhập ghi chú, tab "Đơn phép" trên Admin Dashboard (duyệt/từ chối đơn)
+- **SPEC:** Viết phần 5 (ROI 3 kịch bản + kill criteria), đồng viết phần 4 (Failure modes — stale data + data leakage)
+- **Demo:** Thiết kế poster/slides, trình bày phần Impact & ROI, demo live chức năng xin phép + báo lỗi
+
+**4. Phạm Thanh Tùng — Chức năng: Auth + Admin Dashboard + Escalation**
+- **AI:** Lập trình tool `escalate_to_hr` (khi câu hỏi quá phức tạp/khiếu nại → Agent tự tạo ticket chuyển HR), xây dựng dashboard thống kê AI — biểu đồ phân bổ tool usage (search_policy vs calculate_leave vs escalate vs reject), lượt chat theo ngày, câu hỏi gần đây
+- **Prototype:** Backend: auth endpoints (register/login + hash password + seed HR account), admin endpoints (CRUD users, toggle role, xem/xóa error reports, list documents, chat logs, faq-stats aggregation pipeline). Frontend: trang Login (`login/page.tsx`), trang Register (`register/page.tsx`), Admin Dashboard (`admin/page.tsx`) — 6 tabs: Tổng quan, Đơn phép, Người dùng, FAQ & Thống kê, Báo lỗi, Tài liệu
+- **SPEC:** Viết phần 3 (Eval metrics + threshold + red flags), đồng viết phần 4 (Failure mode #3 — jailbreak + mitigation)
+- **Demo:** Test toàn bộ prototype, chuẩn bị Q&A, trình bày phần Eval Metrics & Security
+
+**5. Dương Phương Thảo — Chức năng: System Prompt + Data Engineering + Learning Signal**
+- **AI:** Viết toàn bộ System Prompt (`prompts.py`) — thiết kế AGENT_SYSTEM_PROMPT (9 quy tắc bắt buộc cho Agent: khi nào dùng tool nào, phong cách trả lời, disclaimer), WELCOME_MESSAGE, SUGGESTED_QUESTIONS. Thiết kế Correction Flow / Learning Signal (Báo lỗi → error_reports DB → HR review → cập nhật knowledge base → AI cải thiện)
+- **Prototype:** Thu thập, nghiên cứu và chuẩn hóa 4 file dữ liệu HR nội bộ (`chinh-sach-nghi-phep.md`, `chinh-sach-bao-hiem.md`, `chinh-sach-luong-thuong.md`, `quy-trinh-onboarding.md`) — đảm bảo format để RAG chunking hiệu quả. Test prompt với nhiều câu hỏi khác nhau, tinh chỉnh system prompt qua nhiều phiên bản
+- **SPEC:** Viết phần 1 (AI Product Canvas — Value/Trust/Feasibility + Learning Signal + Automation vs Augmentation + Marginal Value)
+- **Demo:** Viết nội dung poster/slides, trình bày phần Problem-Solution + Before/After + Data Flywheel
 
 ---
-*SPEC Final — Nhóm 30 · Phòng E403 — Day 5 Hackathon AI Thực Chiến · VinUni 2026*
+*SPEC Final — Nhóm 66 · Phòng E403 — Day 6 Hackathon AI Thực Chiến · VinUni 2026*
