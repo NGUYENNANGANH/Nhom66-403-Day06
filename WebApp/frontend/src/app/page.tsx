@@ -133,7 +133,7 @@ export default function Home() {
                 <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center text-blue-600 font-bold text-lg"><CheckCircle2 /></div>
                 <div>
                     <h1 className="font-bold">Trợ lý Phân tích - HR Copilot</h1>
-                    <p className="text-xs text-blue-200">Nhóm 30 - AI RAG Engine</p>
+                    <p className="text-xs text-blue-200">Nhóm 66 - AI RAG Engine</p>
                 </div>
             </div>
             <div className="flex gap-3 items-center">
